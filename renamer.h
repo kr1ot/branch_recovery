@@ -11,10 +11,14 @@ private:
 	// Entry contains: physical register mapping
 	/////////////////////////////////////////////////////////////////////
 
+	uint64_t *rmt;
+
 	/////////////////////////////////////////////////////////////////////
 	// Structure 2: Architectural Map Table
 	// Entry contains: physical register mapping
 	/////////////////////////////////////////////////////////////////////
+
+	uint64_t *amt;
 
 	/////////////////////////////////////////////////////////////////////
 	// Structure 3: Free List
@@ -24,6 +28,16 @@ private:
 	// Notes:
 	// * Structure includes head, tail, and their phase bits.
 	/////////////////////////////////////////////////////////////////////
+
+	struct free_list_s {
+		uint64_t *free_list_entry;
+		uint64_t head_ptr;
+		uint64_t tail_ptr;
+		bool head_phase;
+		bool tail_phase;
+	};
+
+	free_list_s free_list;
 
 	/////////////////////////////////////////////////////////////////////
 	// Structure 4: Active List
@@ -64,6 +78,39 @@ private:
 	// * Structure includes head, tail, and their phase bits.
 	/////////////////////////////////////////////////////////////////////
 
+	//structure defines the propertieis of each active list entry
+	struct active_list_entry_s {
+		uint64_t log_reg_num;
+		uint64_t phy_reg_num;
+		bool has_dst_reg;
+
+		bool has_exec_completed;
+
+		bool is_exception;
+		bool is_load_violation;
+		bool is_branch_mispred;
+		bool is_val_mispred;
+
+		bool is_instr_load;
+		bool is_instr_store;
+		bool is_instr_branch;
+		bool is_instr_amo;
+		bool is_instr_csr;
+
+		uint64_t pc;
+	};
+	
+	//structure defines the entire active list
+	struct active_list_s{
+		active_list_entry_s *active_list_entry;
+		uint64_t head_ptr;
+		uint64_t tail_ptr;
+		bool head_phase;
+		bool tail_phase;
+	};
+	
+	active_list_s active_list;
+
 	/////////////////////////////////////////////////////////////////////
 	// Structure 5: Physical Register File
 	// Entry contains: value
@@ -73,10 +120,13 @@ private:
 	//   (#include <inttypes.h>, already at top of this file)
 	/////////////////////////////////////////////////////////////////////
 
+	uint64_t *prf;
+
 	/////////////////////////////////////////////////////////////////////
 	// Structure 6: Physical Register File Ready Bit Array
 	// Entry contains: ready bit
 	/////////////////////////////////////////////////////////////////////
+	bool *prf_ready_bits;
 
 	/////////////////////////////////////////////////////////////////////
 	// Structure 7: Global Branch Mask (GBM)
@@ -125,6 +175,14 @@ private:
 	// 2. checkpointed Free List head pointer and its phase bit
 	// 3. checkpointed GBM
 	/////////////////////////////////////////////////////////////////////
+	struct branch_checkpoint_s{
+		uint64_t *shadow_map_table;
+		uint64_t checkpoint_GBM;
+		bool checkpoint_fl_head_ptr;
+		bool checkpoint_fl_tail_ptr;
+	};
+
+	branch_checkpoint_s *branch_checkpoint;
 
 	/////////////////////////////////////////////////////////////////////
 	// Private functions.
