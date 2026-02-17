@@ -6,6 +6,7 @@ renamer::renamer(uint64_t n_log_regs,
 		uint64_t n_active)
 {
     n_branches = n_branches;
+    n_log_regs = n_log_regs;
 
     //create rmt with size n_log_regs
     rmt = new uint64_t[n_log_regs];
@@ -140,6 +141,12 @@ uint64_t renamer::rename_rdst(uint64_t log_reg)
     return prf_index;
 }
 
+uint64_t renamer::checkpoint()
+{
+    return 1;
+}
+
+
 bool renamer::stall_dispatch(uint64_t bundle_inst)
 {
     //get the number of "free" active list entries
@@ -243,11 +250,113 @@ void renamer::set_complete(uint64_t AL_index)
     active_list.active_list_entry[AL_index].has_exec_completed = true;
 }
 
+void renamer::resolve(uint64_t AL_index,
+		     uint64_t branch_ID,
+		     bool correct)
+{
+    return;
+}
+
 bool renamer::precommit(bool &completed,
                        bool &exception, bool &load_viol, bool &br_misp, bool &val_misp,
 	               bool &load, bool &store, bool &branch, bool &amo, bool &csr,
 		       uint64_t &PC)
 {
     //check if active list is empty
+    if ((active_list.head_ptr == active_list.tail_ptr) &&
+        (active_list.head_phase == active_list.tail_phase)) { return false;}
     
+    //peek for all the required parameters
+    completed = active_list.active_list_entry[active_list.head_ptr].has_exec_completed;
+    exception = active_list.active_list_entry[active_list.head_ptr].is_exception;
+    load_viol = active_list.active_list_entry[active_list.head_ptr].is_load_violation;
+    br_misp = active_list.active_list_entry[active_list.head_ptr].is_branch_mispred;
+    val_misp = active_list.active_list_entry[active_list.head_ptr].is_val_mispred;
+    load = active_list.active_list_entry[active_list.head_ptr].is_instr_load;
+    store = active_list.active_list_entry[active_list.head_ptr].is_instr_store;
+    branch = active_list.active_list_entry[active_list.head_ptr].is_instr_branch;
+    amo = active_list.active_list_entry[active_list.head_ptr].is_instr_amo;
+    csr = active_list.active_list_entry[active_list.head_ptr].is_instr_csr;
+    PC = active_list.active_list_entry[active_list.head_ptr].pc;
+    
+    return true;
+
 }
+
+void renamer::commit()
+{
+    //if destination exists for the instruction at head
+    // 1. get the log and phys reg 
+    // 2. index the AMT using log reg and get the mapping
+    // 3. store the mapping at tail of free list
+    // 4. replace the index in AMT with phys reg
+    //if destination does not exist for instruction
+    // - do nothing
+    if (active_list.active_list_entry[active_list.head_ptr].has_dst_reg == true)
+    {
+        uint64_t log_reg = active_list.active_list_entry[active_list.head_ptr].log_reg_num;
+        uint64_t phys_reg = active_list.active_list_entry[active_list.head_ptr].phy_reg_num;
+
+        free_list.free_list_entry[free_list.tail_ptr] = amt[log_reg];
+        //increment tail
+        free_list.tail_ptr++;
+        if (free_list.tail_ptr == free_list.size)
+        {
+            free_list.tail_ptr = 0;
+            free_list.tail_phase = !free_list.tail_phase;
+        }
+        //update amt
+        amt[log_reg] = phys_reg; 
+    }
+
+    //commited and freed the registers, now
+    //increment the head pointer in active list
+    active_list.head_ptr++;
+    if (active_list.head_ptr == active_list.size)
+    {
+        active_list.head_ptr = 0;
+        active_list.head_phase = !active_list.head_phase;
+    }
+}
+
+void renamer::squash()
+{
+    //squash all the instructions
+    //1.flash copy amt into rmt
+    for (uint64_t idx = 0; idx < n_log_regs; idx++)
+        rmt[idx] = amt[idx];
+    //2. restore the active list to empty
+    active_list.tail_ptr = active_list.head_ptr;
+    active_list.tail_phase = active_list.head_phase;
+    //3. restore the GBM checkpoints to all free
+    GBM = 0;
+    //4. make free list full
+    free_list.head_ptr = free_list.tail_ptr;
+    free_list.head_phase = !free_list.tail_phase;
+}
+
+void renamer::set_exception(uint64_t AL_index)
+{
+    active_list.active_list_entry[AL_index].is_exception = true;
+}
+
+void renamer::set_load_violation(uint64_t AL_index)
+{
+    active_list.active_list_entry[AL_index].is_load_violation = true;
+}
+
+void renamer::set_branch_misprediction(uint64_t AL_index)
+{
+    active_list.active_list_entry[AL_index].is_branch_mispred = true;
+}
+
+void renamer::set_value_misprediction(uint64_t AL_index)
+{
+    active_list.active_list_entry[AL_index].is_val_mispred = true;
+}
+
+bool renamer::get_exception(uint64_t AL_index)
+{
+    return active_list.active_list_entry[AL_index].is_exception;
+}
+
