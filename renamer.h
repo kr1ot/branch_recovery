@@ -31,6 +31,7 @@ private:
 
 	struct free_list_s {
 		uint64_t *free_list_entry;
+		uint64_t size;
 		uint64_t head_ptr;
 		uint64_t tail_ptr;
 		bool head_phase;
@@ -82,6 +83,7 @@ private:
 	struct active_list_entry_s {
 		uint64_t log_reg_num;
 		uint64_t phy_reg_num;
+		bool is_entry_valid;  //true whenever an instruction is allocated
 		bool has_dst_reg;
 
 		bool has_exec_completed;
@@ -103,6 +105,7 @@ private:
 	//structure defines the entire active list
 	struct active_list_s{
 		active_list_entry_s *active_list_entry;
+		uint64_t size;
 		uint64_t head_ptr;
 		uint64_t tail_ptr;
 		bool head_phase;
@@ -178,11 +181,18 @@ private:
 	struct branch_checkpoint_s{
 		uint64_t *shadow_map_table;
 		uint64_t checkpoint_GBM;
-		bool checkpoint_fl_head_ptr;
-		bool checkpoint_fl_tail_ptr;
+		uint64_t checkpoint_fl_head_ptr;
+		uint64_t checkpoint_fl_tail_ptr;
+		bool checkpoint_fl_head_ptr_phase;
+		bool checkpoint_fl_tail_ptr_phase;
 	};
 
 	branch_checkpoint_s *branch_checkpoint;
+
+	/////////////////////////////////////////////////////////////////////
+	// Private variables.
+	/////////////////////////////////////////////////////////////////////
+	uint64_t n_branches;
 
 	/////////////////////////////////////////////////////////////////////
 	// Private functions.

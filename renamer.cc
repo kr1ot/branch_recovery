@@ -4,49 +4,250 @@ renamer::renamer(uint64_t n_log_regs,
 		uint64_t n_phys_regs,
 		uint64_t n_branches,
 		uint64_t n_active)
-        {
-            //create rmt with size n_log_regs
-            rmt = new uint64_t[n_log_regs];
-            //pipeline empty state
-            for (uint64_t idx = 0; idx < n_log_regs; idx++){
-                rmt[idx] = idx;
-            }
-            
-            //similarly initialize AMT
-            amt = new uint64_t[n_log_regs];
-            for (uint64_t idx = 0; idx < n_log_regs; idx++){
-                amt[idx] = idx;
-            }
+{
+    n_branches = n_branches;
 
-            //size of free list = n_phys_reg - n_log_regs
-            uint64_t free_list_size = n_phys_regs - n_log_regs;
-            //create the free list
-            free_list.free_list_entry = new uint64_t[free_list_size];
-            for (uint64_t idx = 0; idx < free_list_size; idx++){
-                //free list contains all the physical register mappings other than
-                //registers in the RMT 
-                free_list.free_list_entry[idx] = n_log_regs + idx;
-            }
+    //create rmt with size n_log_regs
+    rmt = new uint64_t[n_log_regs];
+    //pipeline empty state
+    for (uint64_t idx = 0; idx < n_log_regs; idx++){
+        rmt[idx] = idx;
+    }
+    
+    //similarly initialize AMT
+    amt = new uint64_t[n_log_regs];
+    for (uint64_t idx = 0; idx < n_log_regs; idx++){
+        amt[idx] = idx;
+    }
 
-            //initialize free list to be full 
-            free_list.head_ptr = 0;
-            free_list.tail_ptr = 0;
-            free_list.head_phase = false;
-            free_list.tail_phase = true;
+    //size of free list = n_phys_reg - n_log_regs
+    free_list.size = n_phys_regs - n_log_regs;
 
-            //create Active list with size n_active
-            active_list.active_list_entry = new active_list_entry_s[n_active];
-            
-            //make active list empty using the pointers
-            active_list.head_ptr = 0;
-            active_list.tail_ptr = 0;
-            active_list.head_phase = false;
-            active_list.tail_phase = false;
-        
-            //create physical register file with the size n_phys_reg
-            prf = new uint64_t[n_phys_regs];
-            //same size for the ready bits
-            prf_ready_bits = new bool[n_phys_regs];
+    //create the free list
+    free_list.free_list_entry = new uint64_t[free_list.size];
+    for (uint64_t idx = 0; idx < free_list.size; idx++){
+        //free list contains all the physical register mappings other than
+        //registers in the RMT 
+        free_list.free_list_entry[idx] = n_log_regs + idx;
+    }
 
+    //initialize free list to be full 
+    free_list.head_ptr = 0;
+    free_list.tail_ptr = 0;
+    free_list.head_phase = false;
+    free_list.tail_phase = true;
 
+    //create Active list with size n_active
+    active_list.size = n_active;
+    active_list.active_list_entry = new active_list_entry_s[active_list.size];
+    for (uint64_t idx = 0; idx < active_list.size; idx++){
+        active_list.active_list_entry[idx].is_entry_valid = false;
+    }
+
+    
+    //make active list empty using the pointers
+    active_list.head_ptr = 0;
+    active_list.tail_ptr = 0;
+    active_list.head_phase = false;
+    active_list.tail_phase = false;
+
+    //create physical register file with the size n_phys_reg
+    prf = new uint64_t[n_phys_regs];
+    //same size for the ready bits
+    prf_ready_bits = new bool[n_phys_regs];
+    //make the logical registers ready
+    for (uint64_t idx = 0; idx < n_log_regs; idx++){
+        prf_ready_bits[idx] = true;
+    }
+
+    //initial state of GBM is all zeros to indicate no branch prior to the instruction
+    GBM = 0;
+
+    //create as many branch checkpoints as number of resolved branches
+    branch_checkpoint = new branch_checkpoint_s[n_branches];
+    //for each branch checkpoint, create shadow map table of depth n_log_regs
+    for (uint64_t idx = 0; idx < n_branches; idx++){
+        branch_checkpoint[idx].shadow_map_table = new uint64_t[n_log_regs];
+    }
+
+}
+
+bool renamer::stall_reg(uint64_t bundle_dst)
+{
+    //get the number of "free" free list entries
+    //way to decode based on head and tail pointer phases -
+    //1. same phase flags 
+    //  - direct subtraction -> tail - head (since free entries are pushed at tail)
+    //2. different phase flags
+    //  - subtraction from the size 
+    uint64_t free_fl_entries;
+    if (free_list.head_phase == free_list.tail_phase)
+        free_fl_entries = free_list.tail_ptr - free_list.head_ptr;
+    else
+        free_fl_entries = free_list.size - (free_list.head_ptr - free_list.tail_ptr);
+
+    return (free_fl_entries < bundle_dst);
+}
+
+bool renamer::stall_branch(uint64_t bundle_branch){
+    //count number of 1s in the GBM 
+    uint64_t unresolve_branch_mask;
+    if (n_branches == 64)
+        unresolve_branch_mask = ~0ULL;
+    else
+        unresolve_branch_mask = (1ULL << n_branches) - 1;
+    
+    uint64_t masked_gbm = unresolve_branch_mask & GBM;
+    uint64_t count_ones = 0;
+    //find the number of 1s in the masked gbm
+    for (uint64_t idx = 0; idx < n_branches; idx++){
+        if ((masked_gbm & 1) == 1) {
+            count_ones = count_ones + 1;
         }
+        masked_gbm = masked_gbm >> 1;
+        if ((n_branches - count_ones) >= bundle_branch) return false; 
+    }
+    return true;
+}
+
+uint64_t renamer::get_branch_mask()
+{
+    return GBM;
+}
+
+uint64_t renamer::rename_rsrc(uint64_t log_reg)
+{
+    //get the mapping of the src register from RMT
+    return rmt[log_reg];
+}
+
+uint64_t renamer::rename_rdst(uint64_t log_reg)
+{
+    //get the entry from head of the free list
+    uint64_t prf_index;
+    prf_index = free_list.free_list_entry[free_list.head_ptr]; 
+
+    //assign the index to rmt
+    rmt[log_reg] = prf_index;
+
+    //increment head ensuring the the phase bits are taken care of
+    free_list.head_ptr++;
+    if (free_list.head_ptr == free_list.size){
+        //roll over
+        free_list.head_ptr = 0;
+        free_list.head_phase = !free_list.head_phase;
+    }
+    return prf_index;
+}
+
+bool renamer::stall_dispatch(uint64_t bundle_inst)
+{
+    //get the number of "free" active list entries
+    //way to decode based on head and tail pointer phases -
+    //1. same phase flags 
+    //  - direct subtraction -> tail - head (since entries are allocated at tail)
+    //2. different phase flags
+    //  - subtraction from the size 
+    uint64_t used_al_entries;
+    if (active_list.head_phase == active_list.tail_phase)
+        used_al_entries = active_list.tail_ptr - active_list.head_ptr;
+    else
+        used_al_entries = active_list.size - (active_list.head_ptr - active_list.tail_ptr);
+    
+    uint64_t free_al_entries = active_list.size - used_al_entries;
+
+    return (free_al_entries < bundle_inst);
+}
+
+uint64_t renamer::dispatch_inst(bool dest_valid,
+	                       uint64_t log_reg,
+	                       uint64_t phys_reg,
+	                       bool load,
+	                       bool store,
+	                       bool branch,
+	                       bool amo,
+	                       bool csr,
+	                       uint64_t PC)
+{
+    //get the index of the active list from the tail 
+    uint64_t active_list_index;
+    active_list_index = active_list.tail_ptr;
+    //assign the entry at tail
+    active_list.active_list_entry[active_list_index].has_dst_reg = dest_valid;
+    if (dest_valid == true){
+        active_list.active_list_entry[active_list_index].log_reg_num = log_reg;
+        active_list.active_list_entry[active_list_index].phy_reg_num = phys_reg;
+    }
+    else {
+        //assigning it 0, anyways wont be using these when dest_valid is false
+        active_list.active_list_entry[active_list_index].log_reg_num = 0;
+        active_list.active_list_entry[active_list_index].phy_reg_num = 0;
+    }
+    //assign all the other variables related to execution as false as they havent executed yet
+    active_list.active_list_entry[active_list_index].has_exec_completed = false;
+
+    active_list.active_list_entry[active_list_index].is_exception = false;
+    active_list.active_list_entry[active_list_index].is_load_violation = false;
+    active_list.active_list_entry[active_list_index].is_branch_mispred = false;
+    active_list.active_list_entry[active_list_index].is_val_mispred = false;
+
+    //based on the type of instruction, assign the variables
+    active_list.active_list_entry[active_list_index].is_instr_load = load;
+    active_list.active_list_entry[active_list_index].is_instr_store = store;
+    active_list.active_list_entry[active_list_index].is_instr_branch = branch;
+    active_list.active_list_entry[active_list_index].is_instr_amo = amo;
+    active_list.active_list_entry[active_list_index].is_instr_csr = csr;
+
+    active_list.active_list_entry[active_list_index].pc = PC;
+    //indicate the instruction is allocated at the entry
+    active_list.active_list_entry[active_list_index].is_entry_valid = true;
+
+    //increment the tail now
+    active_list.tail_ptr++;
+    if (active_list.tail_ptr == active_list.size){
+        active_list.tail_ptr = 0;
+        active_list.tail_phase = !active_list.tail_phase;
+    }
+
+    //return the index from active list where the instruction is assigned
+    return active_list_index;
+}
+
+bool renamer::is_ready(uint64_t phys_reg)
+{
+    return prf_ready_bits[phys_reg];
+}
+
+void renamer::clear_ready(uint64_t phys_reg)
+{
+    prf_ready_bits[phys_reg] = false;
+}
+
+uint64_t renamer::read(uint64_t phys_reg)
+{
+    return prf[phys_reg];
+}
+
+void renamer::set_ready(uint64_t phys_reg)
+{
+    prf_ready_bits[phys_reg] = true;
+}
+
+void renamer::write(uint64_t phys_reg, uint64_t value)
+{
+    prf[phys_reg] = value;
+}
+
+void renamer::set_complete(uint64_t AL_index)
+{
+    active_list.active_list_entry[AL_index].has_exec_completed = true;
+}
+
+bool renamer::precommit(bool &completed,
+                       bool &exception, bool &load_viol, bool &br_misp, bool &val_misp,
+	               bool &load, bool &store, bool &branch, bool &amo, bool &csr,
+		       uint64_t &PC)
+{
+    //check if active list is empty
+    
+}
