@@ -5,8 +5,8 @@ renamer::renamer(uint64_t n_log_regs,
 		uint64_t n_branches,
 		uint64_t n_active)
 {
-    n_branches = n_branches;
-    n_log_regs = n_log_regs;
+    this->n_branches = n_branches;
+    this->n_log_regs = n_log_regs;
 
     //create rmt with size n_log_regs
     rmt = new uint64_t[n_log_regs];
