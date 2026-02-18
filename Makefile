@@ -25,3 +25,4 @@ clean:
 	rm -f *.o 721sim core
 clobber:
 	rm -f *.o
+	
