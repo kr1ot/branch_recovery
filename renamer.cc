@@ -311,7 +311,10 @@ void renamer::resolve(uint64_t AL_index,
         //restore the active list tail pointer from AL_index. Its the next index after
         //branch
         active_list.tail_ptr = (AL_index + 1) % active_list.size;
-        if (active_list.tail_ptr >= active_list.head_ptr) active_list.tail_phase = active_list.head_phase;
+        //retrieve the phase based on the position of tail pointer with respect to head
+        //if tail is ahead, then same phase. it cannot be equal as AL is not empty
+        if (active_list.tail_ptr > active_list.head_ptr) active_list.tail_phase = active_list.head_phase;
+        //if tail is behind, then phase is different
         else active_list.tail_phase = !active_list.head_phase;
 
     }
