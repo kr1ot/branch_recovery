@@ -83,7 +83,6 @@ private:
 	struct active_list_entry_s {
 		uint64_t log_reg_num;
 		uint64_t phy_reg_num;
-		bool is_entry_valid;  //true whenever an instruction is allocated
 		bool has_dst_reg;
 
 		bool has_exec_completed;
@@ -182,9 +181,7 @@ private:
 		uint64_t *shadow_map_table;
 		uint64_t checkpoint_GBM;
 		uint64_t checkpoint_fl_head_ptr;
-		uint64_t checkpoint_fl_tail_ptr;
 		bool checkpoint_fl_head_ptr_phase;
-		bool checkpoint_fl_tail_ptr_phase;
 	};
 
 	branch_checkpoint_s *branch_checkpoint;

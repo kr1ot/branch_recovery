@@ -1,4 +1,5 @@
 #include "renamer.h"
+#include <stdio.h>
 
 renamer::renamer(uint64_t n_log_regs,
 		uint64_t n_phys_regs,
@@ -41,10 +42,6 @@ renamer::renamer(uint64_t n_log_regs,
     //create Active list with size n_active
     active_list.size = n_active;
     active_list.active_list_entry = new active_list_entry_s[active_list.size];
-    for (uint64_t idx = 0; idx < active_list.size; idx++){
-        active_list.active_list_entry[idx].is_entry_valid = false;
-    }
-
     
     //make active list empty using the pointers
     active_list.head_ptr = 0;
@@ -106,9 +103,9 @@ bool renamer::stall_branch(uint64_t bundle_branch){
             count_ones = count_ones + 1;
         }
         masked_gbm = masked_gbm >> 1;
-        if ((n_branches - count_ones) >= bundle_branch) return false; 
     }
-    return true;
+    if ((n_branches - count_ones) >= bundle_branch) return false; 
+    else return true;
 }
 
 uint64_t renamer::get_branch_mask()
@@ -143,7 +140,39 @@ uint64_t renamer::rename_rdst(uint64_t log_reg)
 
 uint64_t renamer::checkpoint()
 {
-    return 1;
+    //get the location of first 0 from the GBM
+    uint64_t branch_id = 0; //will be used as branch ID
+    uint64_t gbm_mask = (n_branches == 64) ? ~0ULL : ((1ULL << n_branches)- 1);
+    //get the masked gbm with 64 bit vector
+    uint64_t masked_gbm = GBM & gbm_mask;
+    while(branch_id != n_branches){
+        //when got the 1st zero, got a free branch space and can now checkpoint
+        if ((masked_gbm & 1) == 0) 
+        {
+            //checkpoint GBM
+            branch_checkpoint[branch_id].checkpoint_GBM = GBM;
+            //checkpoint free list pointers
+            branch_checkpoint[branch_id].checkpoint_fl_head_ptr = free_list.head_ptr;
+            branch_checkpoint[branch_id].checkpoint_fl_head_ptr_phase = free_list.head_phase;
+            //checkpoint the entire RMT
+            for (uint64_t idx = 0; idx < n_log_regs; idx++)
+            {
+                branch_checkpoint[branch_id].shadow_map_table[idx] = rmt[idx];
+            }
+            //update the GBM and make 0 -> 1 to indicate it has been checkpointed
+            //and indexed using branch_id or the branch ID
+            //printf("Called a branch with GBM = %u\n",GBM);
+            GBM = GBM | (1ULL << branch_id);
+            //printf("Updated GBM to %u\n",GBM);
+            break;
+        }
+
+        //if not zero, move to the next "0" spot
+        branch_id = branch_id + 1;
+        masked_gbm = masked_gbm >> 1;
+    }
+    //printf("Returned branch ID = %u\n",branch_id);
+    return branch_id;
 }
 
 
@@ -206,8 +235,6 @@ uint64_t renamer::dispatch_inst(bool dest_valid,
     active_list.active_list_entry[active_list_index].is_instr_csr = csr;
 
     active_list.active_list_entry[active_list_index].pc = PC;
-    //indicate the instruction is allocated at the entry
-    active_list.active_list_entry[active_list_index].is_entry_valid = true;
 
     //increment the tail now
     active_list.tail_ptr++;
@@ -254,7 +281,21 @@ void renamer::resolve(uint64_t AL_index,
 		     uint64_t branch_ID,
 		     bool correct)
 {
-    return;
+    //if branch is correctly predicted, no recovery required.
+    //clear branch bit in the GBM and all checkpointed GBMs
+    if (correct == true)
+    {
+        //printf("**Resolving branch ID = %u\n",branch_ID);
+        //printf("**Before resolution GBM = %u\n",GBM);
+        GBM &= ~(1ULL << branch_ID);
+        //printf("**After resolution GBM = %u\n",GBM);
+
+        //loop through all the checkpoints and reset them to 0
+        for (uint64_t idx = 0; idx < n_branches; idx++)
+        {
+            branch_checkpoint[idx].checkpoint_GBM &= ~(1ULL << branch_ID);
+        }
+    }
 }
 
 bool renamer::precommit(bool &completed,
