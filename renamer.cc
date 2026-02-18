@@ -175,7 +175,6 @@ uint64_t renamer::checkpoint()
     return branch_id;
 }
 
-
 bool renamer::stall_dispatch(uint64_t bundle_inst)
 {
     //get the number of "free" active list entries
@@ -296,6 +295,26 @@ void renamer::resolve(uint64_t AL_index,
             branch_checkpoint[idx].checkpoint_GBM &= ~(1ULL << branch_ID);
         }
     }
+    else 
+    {
+        //update the GBM to checkpointed GBM based on branch ID
+        //and clear the bit from the checkpointed GBM
+        GBM = branch_checkpoint[branch_ID].checkpoint_GBM & ~(1ULL << branch_ID);
+        //restore RMT from the shadow map table
+        for (uint64_t idx = 0; idx < n_log_regs; idx++)
+        {
+            rmt[idx] = branch_checkpoint[branch_ID].shadow_map_table[idx];
+        }
+        free_list.head_ptr = branch_checkpoint[branch_ID].checkpoint_fl_head_ptr;
+        free_list.head_phase = branch_checkpoint[branch_ID].checkpoint_fl_head_ptr_phase;
+
+        //restore the active list tail pointer from AL_index. Its the next index after
+        //branch
+        active_list.tail_ptr = (AL_index + 1) % active_list.size;
+        if (active_list.tail_ptr >= active_list.head_ptr) active_list.tail_phase = active_list.head_phase;
+        else active_list.tail_phase = !active_list.head_phase;
+
+    }
 }
 
 bool renamer::precommit(bool &completed,
@@ -370,7 +389,7 @@ void renamer::squash()
     active_list.tail_ptr = active_list.head_ptr;
     active_list.tail_phase = active_list.head_phase;
     //3. restore the GBM checkpoints to all free
-    GBM = 0;
+    GBM = 0ULL;
     //4. make free list full
     free_list.head_ptr = free_list.tail_ptr;
     free_list.head_phase = !free_list.tail_phase;
